@@ -1,0 +1,64 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+venv_*/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large data files
+*.json
+!*.example.json
+!*.template.json
+!package.json
+!tsconfig.json
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Virtual environments created in project
+venv_laya/
+venv_test/
+
+# Evaluation reports (can be large)
+eval_report_*.json
+eval_prereg_*.json
+calibration_results.json
+calibration_markets.json
+resolved_markets.json
+closed_markets.json
+
+# Higgsfield cache
+.higgsfield/
+
+# Laya cache
+.laya/

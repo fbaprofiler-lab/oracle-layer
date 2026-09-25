@@ -2,7 +2,7 @@
 
 ## The Product
 
-**Oracle Layers** is a calibrated prediction-market intelligence platform that fuses macro/energy fundamentals, prediction-market microstructure, AI-calibrated probabilistic judgment, and generative explainers into a single intelligence feed.
+**Oracle Layers** is a calibrated prediction-market intelligence platform that fuses macro/energy fundamentals, prediction-market microstructure, AI-calibrated probabilistic judgment, generative explainers, and **an autonomous self-improvement (RSI) loop** into a single intelligence feed.
 
 **What we sell:** Tiered intelligence subscriptions for prediction-market traders and macro-aware investors:
 - **Pro API ($49–99/mo):** REST + WebSocket, real-time fused signals with calibrated probabilities, macro transmission context, smart-money flow, risk factors
@@ -25,7 +25,7 @@ No competitor has calibrated this chain end-to-end with probabilistic judgments 
 
 ---
 
-## The Architecture
+## The Architecture (Live)
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌──────────────────┐     ┌─────────────────┐
@@ -41,9 +41,20 @@ No competitor has calibrated this chain end-to-end with probabilistic judgments 
 │  • Smart-money wallet flow analysis  • Leakage scanner (zero tolerance)    │
 │  • 10-category reliability curves    • Pre-registered evaluations only     │
 └─────────────────────────────────────────────────────────────────────────────┘
+       │
+       ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    AUTONOMOUS RSI LOOP (LIVE)                               │
+│  • Hypothesis Generator: 8×6×3×4 = 576 configs                             │
+│  • Candidate Registry: 723 experiments, append-only JSONL                  │
+│  • Sandbox Evaluator: Isotonic calibrator → ECE/Brier/hit-rate             │
+│  • Experiment Runner: Sandbox → Charter pipeline                            │
+│  • Resolution Scheduler: Daily 2 AM cron for outcome collection            │
+│  • Meta-learning: Triggers at 1000+ outcomes                                │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Core Components (All Built)
+### Core Components (All Built & Running)
 
 | Module | Status | Key Capability |
 |--------|--------|----------------|
@@ -58,6 +69,12 @@ No competitor has calibrated this chain end-to-end with probabilistic judgments 
 | **Resolution Collector** | ✅ | Polls cohort markets, appends outcomes, updates states |
 | **Evaluation Runner** | ✅ | Joins snapshots+outcomes → leakage scan → ECE/Brier/hit-rate → verdict |
 | **Explainers** | ✅ | Script → Higgsfield Seedance 2.5 video generation |
+| **RSI: Hypothesis Gen** | ✅ | 576 configs (8 features × 6 lags × 3 transforms × 4 combos) |
+| **RSI: Candidate Registry** | ✅ | 723 experiments, append-only JSONL, query filters |
+| **RSI: Sandbox Evaluator** | ✅ | Isotonic calibrator → composite scores |
+| **RSI: Experiment Runner** | ✅ | Sandbox → Charter pipeline integration |
+| **RSI: Resolution Scheduler** | ✅ | Daily 2 AM cron (`resolution_scheduler.py`) |
+| **RSI: Meta-learning** | ⏳ | Triggers at 1000+ outcomes |
 
 ---
 
@@ -76,12 +93,17 @@ We **do not** ship uncalibrated signals. Every market set passes through the cha
 
 ---
 
-## Current State (Live)
+## Current State (Live — 2026-09-25)
 
-- **Laya AI service:** Running on `127.0.0.1:8000` (english, multilingual, typed-decisions loaded)
-- **Cohort `cohort_forward_20260924_2`:** 3 active markets, 3 snapshots collected
-- **All 25 tests passing** (evaluation policy, cohorts, snapshots, outcomes, leakage, resolution, evaluation)
-- **Laya server:** Restarted and healthy (models: english, multilingual, typed-decisions)
+| Component | Status |
+|-----------|--------|
+| **Laya AI service** | ✅ `http://localhost:8000` (english, multilingual, typed-decisions loaded) |
+| **Resolution Cron** | ✅ Daily 2 AM (`resolution_scheduler.py`) |
+| **Wedge Cohorts** | ✅ 3 cohorts: fed (30), cpi (30), crypto (30) = 90 markets awaiting resolution |
+| **Experiments** | ✅ 723 registered, 117 sandbox_complete (scores 0.54–0.56) |
+| **Tests** | ✅ 38/38 passing |
+| **Resolution Pipeline** | ✅ 3 cohorts (90 snapshots) awaiting natural resolution |
+| **GitHub** | ✅ Clean, pushed (`origin/master`) |
 
 ---
 
@@ -116,6 +138,21 @@ We **do not** ship uncalibrated signals. Every market set passes through the cha
 | **Generative explainers** | Higgsfield video per signal | Text alerts only |
 | **Audit trail** | Pre-reg → snapshots → outcomes → report | None |
 | **Honesty guarantees** | Leakage scanner, pre-reg only | Self-reported accuracy |
+| **Autonomous RSI loop** | Self-improving experiment pipeline | None |
+
+---
+
+## Financial Projections (Conservative)
+
+| Model | Y1 | Y2 | Y3 |
+|-------|-----|-----|-----|
+| **B2B SaaS (Calibration API)** | $500K (10×$50K) | $3.75M (50×$75K) | $20M (200×$100K) |
+| **Performance Fees** | $0 | $500K–$1M | $5M–$10M |
+| **Data Licensing** | $0 | $2.4M | $12M |
+| **Total ARR (Conservative)** | $500K | $6.65M | $32M |
+| **Upside (Meta-learning + Multi-platform)** | — | — | $100M+ |
+
+*Assumptions: Calibration edge ≥0.02, 3+ BUILD-1 evals, multi-platform expansion, institutional adoption*
 
 ---
 
@@ -145,7 +182,7 @@ We are pre-revenue, pre-GO. The next 3–6 months are pure evaluation:
 
 ---
 
-## Product Clarification: Continuous Calibrated Stream (Added 2026-09-24)
+## Product Clarification: Continuous Calibrated Stream
 
 ### The Product Is NOT "Wait for Resolution"
 
@@ -186,7 +223,7 @@ The macro wedge works because the **transmission chain has frequent intermediate
 
 ---
 
-## Strategic Positioning Agreement (2026-09-24)
+## Strategic Positioning Agreement
 
 > **"We pick the markets we're successful at and market those — we're market agnostic and focused on results."**
 

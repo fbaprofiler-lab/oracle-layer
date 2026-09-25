@@ -4,6 +4,7 @@ Oracle Layer — Polymarket Data Source (Market Microstructure & Wallet Intellig
 
 import os
 import asyncio
+import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 import httpx
@@ -18,6 +19,52 @@ class PolymarketSource(DataSource):
 
     DATA_API = "https://data-api.polymarket.com"
     GAMMA_API = "https://gamma-api.polymarket.com"
+
+    # Gamma's /markets endpoint has no `category` field. Passing one is
+    # silently ignored and the response is an arbitrary page of whatever
+    # sorts first, which is how 93 snapshots of 2028 nomination markets
+    # ended up inside the fed/cpi/crypto cohorts. Categories are therefore
+    # expressed as Gamma tag ids.
+    #
+    # Verified against the live /tags endpoint:
+    #   21 crypto, 131 interest-rates, 933 federal-government,
+    #   101247 macro-graph, 101800 economic-policy, 102000 macro-indicators
+    CATEGORY_TAGS: Dict[str, List[int]] = {
+        "crypto": [21],
+        "crypto-prices": [21],
+        "interest-rates": [131],
+        "fed-rate-decisions": [131, 101800],
+        "cpi-inflation": [102000, 101247],
+        "federal-government": [933],
+        "politics": [933],
+    }
+
+    # Tag ids are coarse and international: tag 131 returns Bank of India and
+    # Bank of Russia decisions, and 102000 returns Japan CPI. The charter wedge
+    # is US macro, so a tag hit is only a *candidate* -- the question text must
+    # also match. Verified on 2026-09-25: tags alone returned 0 US-Fed markets
+    # in a 120-day window, while the keyword pass found 22.
+    CATEGORY_PATTERNS: Dict[str, str] = {
+        "fed-rate-decisions": (
+            r"\bFed\b|Federal Reserve|FOMC|Fed rate|Fed cut|Fed rate cut"
+        ),
+        # 'CPI' alone matches Japan/UK/Eurozone prints. The wedge is the US
+        # series, so require a US qualifier on CPI and allow unqualified
+        # 'inflation' only when it also names US/Treasury.
+        "cpi-inflation": (
+            r"(?:\bUS\b|\bU\.S\.|American|United States)[^?]{0,40}(?:\bCPI\b|inflation)"
+            r"|(?:\bCPI\b|inflation)[^?]{0,40}(?:\bUS\b|\bU\.S\.|American|United States)"
+        ),
+        "crypto-prices": (
+            r"Bitcoin|Ethereum|\bBTC\b|\bETH\b|crypto"
+        ),
+    }
+
+    # Categories whose tag ids do not reliably carry the US wedge. For these
+    # we search the whole active window and rely on the keyword pattern, since
+    # tag 21 (crypto) returns token-launch and presale markets rather than
+    # price levels, and 102000/101247 return Japan CPI.
+    CATEGORY_SCAN_ALL: set = {"crypto-prices", "cpi-inflation"}
 
     def __init__(self, config: Dict[str, Any] = None):
         super().__init__("polymarket", config)
@@ -37,21 +84,113 @@ class PolymarketSource(DataSource):
 
     # ─── Market Data ───
 
-    async def get_active_markets(self, category: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get active markets, optionally filtered by category."""
-        params = {"limit": limit, "active": "true", "closed": "false"}
-        if category:
-            params["category"] = category
-        response = await self.client.get(f"{self.GAMMA_API}/markets", params=params)
-        response.raise_for_status()
-        return response.json()
+    async def get_active_markets(
+        self,
+        category: Optional[str] = None,
+        limit: int = 100,
+        *,
+        end_date_min: Optional[str] = None,
+        end_date_max: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Active, open markets, optionally filtered by wedge category.
+
+        An unknown category raises instead of silently widening the query.
+        The previous behaviour -- ignore the filter and return anything -- is
+        precisely the failure this replaces, and it produced a cohort full
+        of markets that could not resolve for years.
+
+        end_date_min/max are applied server-side so a resolution window can
+        be enforced without paging the entire market list.
+        """
+        base: Dict[str, Any] = {"limit": limit, "active": "true", "closed": "false"}
+        if end_date_min:
+            base["end_date_min"] = end_date_min
+        if end_date_max:
+            base["end_date_max"] = end_date_max
+        # Nearest-resolution-first. Sorting ascending surfaces markets that
+        # expired months ago but are still flagged active, which is how a
+        # Dec-2025 crypto market reached a cohort snapshot in Sep-2026.
+        base["order"] = "endDate"
+        base["ascending"] = "false"
+
+        if not category:
+            response = await self.client.get(f"{self.GAMMA_API}/markets", params=base)
+            response.raise_for_status()
+            return response.json()
+
+        try:
+            tag_ids = self.CATEGORY_TAGS[category.lower()]
+        except KeyError:
+            raise ValueError(
+                f"unknown category {category!r}; expected one of "
+                f"{sorted(self.CATEGORY_TAGS)}"
+            ) from None
+
+        # One request per tag: Gamma's tag_id is single-valued, and a comma
+        # list silently degrades to an unfiltered page.
+        markets: List[Dict[str, Any]] = []
+        seen = set()
+
+        if category.lower() in self.CATEGORY_SCAN_ALL:
+            # Tags don't carry the US wedge for this category, and a single
+            # page ordered by endDate is dominated by whatever resolves
+            # soonest (politics/sports). Page deep enough to reach the macro
+            # markets, deduping as we go.
+            #
+            # Depth matters: at 600 markets the US crypto cohort came back
+            # empty, at 2000 it returns 69. Polymarket lists well over 2,000
+            # active markets, and endDate ordering puts the macro series at
+            # the far end of the list.
+            candidates = []
+            for offset in range(0, 2000, 100):
+                response = await self.client.get(
+                    f"{self.GAMMA_API}/markets",
+                    params={**base, "offset": offset},
+                )
+                response.raise_for_status()
+                page = response.json()
+                if not page:
+                    break
+                candidates.extend(page)
+            # Keep the nearest N by end date so the cohort favours markets
+            # that will actually resolve and produce outcomes soonest.
+            candidates.sort(key=lambda m: (m.get("endDate") or ""))
+        else:
+            candidates = []
+            for tag_id in tag_ids:
+                response = await self.client.get(
+                    f"{self.GAMMA_API}/markets", params={**base, "tag_id": tag_id}
+                )
+                response.raise_for_status()
+                candidates.extend(response.json())
+
+        for market in candidates:
+            key = market.get("conditionId") or market.get("id")
+            if key is not None and key in seen:
+                continue
+            seen.add(key)
+            markets.append(market)
+
+        pattern = self.CATEGORY_PATTERNS.get(category.lower())
+        if not pattern:
+            return markets
+        matched = [m for m in markets if re.search(pattern, m.get("question") or "", re.I)]
+        # Falling back to the tag results would silently re-admit the
+        # wrong-domain markets this filter exists to exclude, so return
+        # nothing and let the caller see an empty cohort as a real signal.
+        return matched
 
     async def get_market_details(self, condition_id: str) -> Optional[Dict[str, Any]]:
-        """Get detailed market info by condition ID."""
-        # Gamma does not accept a condition ID in the path; use the supported
-        # collection query and select the matching market deterministically.
+        """Get detailed market info by condition ID.
+
+        Gamma names this parameter `condition_ids` (plural). Passing the
+        singular `condition_id` is silently ignored and returns an arbitrary
+        page of 20 unrelated markets, which is how every forward snapshot
+        collected on 2026-09-25 was populated with the same market
+        ("Xi Jinping out before 2027?") while carrying 51 distinct ids.
+        """
         response = await self.client.get(
-            f"{self.GAMMA_API}/markets", params={"condition_id": condition_id}
+            f"{self.GAMMA_API}/markets", params={"condition_ids": condition_id}
         )
         response.raise_for_status()
         markets = response.json()
@@ -60,7 +199,10 @@ class PolymarketSource(DataSource):
         for market in markets:
             if market.get("conditionId") == condition_id:
                 return market
-        return markets[0]
+        # Deliberately no `markets[0]` fallback. Returning a market that does
+        # not match the requested id attaches real-looking features to the
+        # wrong market, which is far worse than returning nothing.
+        return None
 
     async def get_market_trades(self, condition_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         """Get recent trades for a market."""

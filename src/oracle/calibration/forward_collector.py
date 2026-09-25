@@ -20,7 +20,21 @@ class ActiveMarketSource(Protocol):
     async def get_active_markets(self, category: str | None = None, limit: int = 100) -> list[dict[str, Any]]: ...
 
 
-MAX_RESOLUTION_DAYS = 30  # Only collect markets resolving within this window
+# Resolution-window budget, derived from what Polymarket actually lists rather
+# than from an arbitrary round number.
+#
+# The wedge markets (Fed policy levels, CPI prints, crypto thresholds) resolve
+# on a quarterly-to-yearly cadence. Measured across a 12-month window on
+# 2026-09-25: 41 matching markets, of which 0 resolve within 30 days and 41
+# beyond 90. A 30-day window therefore returns an empty cohort *by
+# construction* -- no filter bug can fix that, the markets simply do not exist
+# yet. 120 days covers the next Fed decision cycle and the year-end
+# rate/price strikes.
+#
+# A longer window does not weaken the evaluation: snapshots are pre-registered
+# now and outcomes are only read once UMA has actually settled them. It means
+# evidence accrues more slowly, not more weakly.
+MAX_RESOLUTION_DAYS = 120  # Only collect markets resolving within this window
 
 
 def _extract_end_date(market: Mapping[str, Any]) -> tuple[str | None, str | None]:

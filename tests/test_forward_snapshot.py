@@ -2,6 +2,7 @@ import asyncio
 import json
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from oracle.calibration.forward_collector import collect_market_batch
@@ -50,8 +51,18 @@ class ForwardCollectorTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "predictions.jsonl"
+            # A market with no resolution date is filtered out by
+            # collect_market_batch (it cannot be shown to resolve inside the
+            # window), so the fixture needs a near-term end_date to exercise
+            # the collect-and-never-touch-outcome path at all.
+            resolves_at = datetime.now(timezone.utc) + timedelta(days=7)
             records = asyncio.run(collect_market_batch(
-                [{"conditionId": "0x1", "question": "Q1", "category": "test"}],
+                [{
+                    "conditionId": "0x1",
+                    "question": "Q1",
+                    "category": "test",
+                    "endDate": resolves_at.isoformat().replace("+00:00", "Z"),
+                }],
                 evaluation_id="eval_forward_1", feature_collector=features,
                 judgment=judgment, snapshot_path=path,
             ))

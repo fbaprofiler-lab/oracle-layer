@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from oracle.calibration.cohorts import create_cohort_manifest, write_manifest, status
-from oracle.calibration.forward_collector import collect_one
+from oracle.calibration.forward_collector import collect_market_batch
 from oracle.calibration.forward_adapters import ForwardFeatureCollector, LayaForwardJudgment
 from oracle.sources.polymarket import polymarket_source
 from oracle.judgment.laya_client import LayaClient
@@ -79,19 +79,17 @@ async def run(args: argparse.Namespace) -> int:
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
 
     judgment = LayaForwardJudgment(LayaClient(mode="remote", preload=False))
-    collected = 0
-    for market in markets:
-        try:
-            await collect_one(
-                market,
-                evaluation_id=args.cohort_id,
-                feature_collector=ForwardFeatureCollector(polymarket_source),
-                judgment=judgment,
-                snapshot_path=snapshot_path,
-            )
-            collected += 1
-        except Exception as exc:
-            print(f"collection failed for {market.get('conditionId')}: {exc}", file=sys.stderr)
+    # collect_market_batch, not collect_one: the resolution-window filter lives
+    # in the batch path. Calling collect_one directly let 2028 nomination
+    # markets into a 30-day cohort.
+    collected = await collect_market_batch(
+        markets,
+        evaluation_id=args.cohort_id,
+        feature_collector=ForwardFeatureCollector(polymarket_source),
+        judgment=judgment,
+        snapshot_path=snapshot_path,
+    )
+    markets_collected = len(collected)
 
     await polymarket_source.close()
     await judgment.client.close()
@@ -102,7 +100,7 @@ async def run(args: argparse.Namespace) -> int:
         "manifest_written": True,
         "manifest_path": str(manifest_path),
         "snapshot_path": str(snapshot_path),
-        "markets_collected": collected,
+        "markets_collected": markets_collected,
     }, indent=2))
     return 0
 

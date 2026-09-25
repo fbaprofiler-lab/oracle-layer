@@ -29,10 +29,12 @@ def create_cohort_manifest(
         if not cid or cid in seen:
             raise ValueError("markets require unique conditionId values")
         seen.add(cid)
+        end_date = market.get("endDateIso") or market.get("endDate")
         entries.append({
             "condition_id": cid,
             "question": market.get("question", ""),
             "category": market.get("category", "unknown"),
+            "end_date": end_date[:10] if end_date and "T" in end_date else end_date,
             "state": "pending",
             "snapshot_id": None,
         })

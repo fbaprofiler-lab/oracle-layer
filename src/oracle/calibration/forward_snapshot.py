@@ -19,6 +19,10 @@ REQUIRED_SNAPSHOT_FIELDS = (
     "judgment_backend", "feature_schema_version",
 )
 
+OPTIONAL_SNAPSHOT_FIELDS = (
+    "end_date", "end_date_iso",
+)
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -33,6 +37,7 @@ def create_snapshot(
     *, evaluation_id: str, prediction_timestamp: str, condition_id: str,
     question: str, category: str, features: Mapping[str, Any], probability: float,
     confidence: float, judgment_backend: str, feature_schema_version: str = "1",
+    end_date: str | None = None, end_date_iso: str | None = None,
 ) -> dict[str, Any]:
     if not 0.0 <= float(probability) <= 1.0:
         raise ValueError("probability must be between 0 and 1")
@@ -57,6 +62,10 @@ def create_snapshot(
         "feature_schema_version": feature_schema_version,
         "created_at": utc_now(),
     }
+    if end_date:
+        record["end_date"] = end_date
+    if end_date_iso:
+        record["end_date_iso"] = end_date_iso
     validate_snapshot(record)
     return record
 

@@ -11,7 +11,7 @@ import json
 import numpy as np
 import urllib.request
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import time
@@ -29,6 +29,13 @@ if env_path.exists():
 
 TYPESAFE_API_KEY = os.environ.get("TYPESAFE_API_KEY", "")
 
+# Evaluation policy is explicit. The current closed-market harness is
+# retrospective by default and cannot qualify the product. Forward mode is
+# reserved for a separate active-market collection path.
+EVAL_MODE = os.environ.get("ORACLE_EVAL_MODE", "retrospective").strip().lower()
+if EVAL_MODE not in {"retrospective", "forward"}:
+    raise ValueError("ORACLE_EVAL_MODE must be 'retrospective' or 'forward'")
+
 # Import oracle-layer sources for real data
 import sys
 import os
@@ -45,12 +52,13 @@ if src_dir not in sys.path:
 from oracle.sources.eia import eia_source
 from oracle.sources.fred import fred_source
 from oracle.sources.polymarket import polymarket_source
+from oracle.calibration.evaluation_policy import determine_verdict
 import asyncio
 
 # Pre-registration for this evaluation - REAL POLYMARKET CATEGORIES
 EVAL_SPEC = {
     "evaluation_id": f"eval_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-    "description": "Calibration evaluation v3 - Jev on closed Polymarket markets by target category (enhanced with macro_context, smart_money_net_flow, timestamps)",
+    "description": "Calibration evaluation v3 - closed Polymarket markets (retrospective by default; enhanced with macro_context, smart_money_net_flow, timestamps)",
     "markets_source": "gamma-api.polymarket.com closed markets with outcomePrices, filtered by category",
     "target_categories": ["US-current-affairs", "Crypto", "Sports", "Pop-Culture", "Coronavirus", "Tech"],
     "target_n": 100,
@@ -61,6 +69,8 @@ EVAL_SPEC = {
         "min_samples": 100,
     },
     "features_used": ["question_text", "latest_market_price", "category", "macro_context", "smart_money_net_flow"],
+    "evaluation_mode": EVAL_MODE,
+    "qualifies_for_gates": EVAL_MODE == "forward",
     "holdout_period": "market already resolved",
     "registered_at": datetime.now().isoformat(),
 }
@@ -725,17 +735,19 @@ def run_evaluation() -> Dict:
         
         actual_outcome = 1 if actual_yes_price > 0.5 else 0
         
-        # Record prediction timestamp (now - this is when we make the prediction)
-        prediction_timestamp = datetime.now().isoformat()
-        prediction_dt = datetime.now()
-        
-        # Get market detail for enhanced features
+        # Record one prediction timestamp before feature collection and judgment.
+        # The scanner treats naive timestamps as UTC; use explicit UTC so the
+        # artifact is unambiguous across machines.
+        prediction_dt = datetime.now(timezone.utc)
+        prediction_timestamp = prediction_dt.isoformat()
+
+        # Get market detail and collect each enhanced feature exactly once.
+        # Re-fetching these sources after the Jev call creates avoidable API
+        # load and can produce inconsistent feature snapshots.
         market_detail = fetch_market_detail(condition_id)
-        
-        # Extract enhanced features
         macro_context = extract_macro_context(market_detail, category, prediction_dt)
         smart_money = extract_smart_money_flow(market_detail, category)
-        
+
         print(f"[{i}/{len(test_markets)}] {question[:70]}...")
         print(f"  Category: {category} | End: {end_date} | Actual: {actual_yes_price:.6f} ({'YES' if actual_outcome else 'NO'})")
         
@@ -750,12 +762,6 @@ def run_evaluation() -> Dict:
             print(f"  Jev: P(YES)={jev_prob:.4f}, conf={jev_conf:.2f}")
             
             correct = (jev_prob > 0.5) == (actual_outcome == 1)
-            
-            # Extract REAL macro context at prediction time
-            macro_context = extract_macro_context(market_detail, category, prediction_dt)
-            
-            # Extract REAL smart money flow
-            smart_money = extract_smart_money_flow(market_detail, category)
             
             results.append({
                 "question": question,
@@ -779,12 +785,6 @@ def run_evaluation() -> Dict:
         except Exception as e:
             print(f"  Jev error: {e}")
             # Still extract enhanced features even if Jev fails, for completeness
-            # Ensure prediction_dt is defined
-            if 'prediction_dt' not in locals():
-                prediction_timestamp = datetime.now().isoformat()
-                prediction_dt = datetime.now()
-            macro_context = extract_macro_context(market_detail, category, prediction_dt)
-            smart_money = extract_smart_money_flow(market_detail, category)
             results.append({
                 "question": question,
                 "condition_id": condition_id,
@@ -817,26 +817,17 @@ def run_evaluation() -> Dict:
         print(f"  Leakage scan: FLAGGED - {len(leakage['flags'])} issues")
         for flag in leakage['flags']:
             print(f"    - {flag['type']}: {flag['detail']}")
-    
+
     metrics = compute_calibration(valid_results)
-    
+
     gate_ece = metrics['ece'] < EVAL_SPEC['gates']['ece_threshold']
     gate_brier = metrics['brier_score'] < EVAL_SPEC['gates']['brier_threshold']
     gate_hitrate = metrics['accuracy'] > EVAL_SPEC['gates']['hit_rate_threshold']
     gate_n = metrics['n'] >= EVAL_SPEC['gates']['min_samples']
-    
     gates_passed = sum([gate_ece, gate_brier, gate_hitrate, gate_n])
-    
-    if gates_passed == 4:
-        verdict = "BUILD-1"
-    elif gates_passed >= 2:
-        verdict = "NARROW + RETEST"
-    else:
-        verdict = "KILL"
-    
-    if metrics['n'] < EVAL_SPEC['gates']['min_samples']:
-        verdict = "INCONCLUSIVE"
-    
+
+    verdict = determine_verdict(metrics, EVAL_MODE, EVAL_SPEC['gates'])
+
     report = {
         "evaluation_spec": EVAL_SPEC,
         "results": results,
@@ -861,6 +852,8 @@ def run_evaluation() -> Dict:
     
     print(f"\n{'='*60}")
     print(f"EVALUATION COMPLETE - VERDICT: {verdict}")
+    if EVAL_MODE == "retrospective":
+        print("QUALIFICATION: NOT ELIGIBLE — retrospective closed-market run")
     print(f"{'='*60}")
     print(f"N: {metrics['n']} (gate: {'PASS' if gate_n else 'FAIL'})")
     print(f"Accuracy: {metrics['accuracy']:.2%} (gate: {'PASS' if gate_hitrate else 'FAIL'} >{EVAL_SPEC['gates']['hit_rate_threshold']:.0%})")

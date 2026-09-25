@@ -48,10 +48,19 @@ class PolymarketSource(DataSource):
 
     async def get_market_details(self, condition_id: str) -> Optional[Dict[str, Any]]:
         """Get detailed market info by condition ID."""
-        response = await self.client.get(f"{self.GAMMA_API}/markets", params={"condition_id": condition_id})
+        # Gamma does not accept a condition ID in the path; use the supported
+        # collection query and select the matching market deterministically.
+        response = await self.client.get(
+            f"{self.GAMMA_API}/markets", params={"condition_id": condition_id}
+        )
         response.raise_for_status()
         markets = response.json()
-        return markets[0] if markets else None
+        if not markets:
+            return None
+        for market in markets:
+            if market.get("conditionId") == condition_id:
+                return market
+        return markets[0]
 
     async def get_market_trades(self, condition_id: str, limit: int = 100) -> List[Dict[str, Any]]:
         """Get recent trades for a market."""

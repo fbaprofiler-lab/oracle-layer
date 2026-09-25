@@ -42,7 +42,7 @@ class LeakageScanResponse(BaseModel):
     by_severity: Dict[str, int]
     by_type: Dict[str, int]
     critical_count: int
-    pass: bool
+    passed: bool
     findings: List[Dict[str, Any]]
 
 
@@ -75,7 +75,9 @@ async def run_leakage_scan_endpoint(request: LeakageScanRequest):
         request.raw_data_file,
         request.eval_report_file
     )
-    return LeakageScanResponse(**result)
+    response = dict(result)
+    response["passed"] = response.pop("pass")
+    return LeakageScanResponse(**response)
 
 
 @router.get("/history")
